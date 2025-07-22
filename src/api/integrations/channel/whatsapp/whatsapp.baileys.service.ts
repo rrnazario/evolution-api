@@ -122,7 +122,7 @@ import makeWASocket, {
   WABrowserDescription,
   WAMediaUpload,
   WAMessage,
-  WAMessageUpdate,
+  WAMessageKey,
   WAPresence,
   WASocket,
 } from 'baileys';
@@ -360,7 +360,7 @@ export class BaileysStartupService extends ChannelStartupService {
       qrcodeTerminal.generate(qr, { small: true }, (qrcode) =>
         this.logger.log(
           `\n{ instance: ${this.instance.name} pairingCode: ${this.instance.qrcode.pairingCode}, qrcodeCount: ${this.instance.qrcode.count} }\n` +
-            qrcode,
+          qrcode,
         ),
       );
 
@@ -887,7 +887,7 @@ export class BaileysStartupService extends ChannelStartupService {
     }: {
       chats: Chat[];
       contacts: Contact[];
-      messages: proto.IWebMessageInfo[];
+      messages: WAMessage[];
       isLatest?: boolean;
       progress?: number;
       syncType?: proto.HistorySync.HistorySyncType;
@@ -952,16 +952,16 @@ export class BaileysStartupService extends ChannelStartupService {
 
         const messagesRepository: Set<string> = new Set(
           chatwootImport.getRepositoryMessagesCache(instance) ??
-            (
-              await this.prismaRepository.message.findMany({
-                select: { key: true },
-                where: { instanceId: this.instanceId },
-              })
-            ).map((message) => {
-              const key = message.key as { id: string };
+          (
+            await this.prismaRepository.message.findMany({
+              select: { key: true },
+              where: { instanceId: this.instanceId },
+            })
+          ).map((message) => {
+            const key = message.key as { id: string };
 
-              return key.id;
-            }),
+            return key.id;
+          }),
         );
 
         if (chatwootImport.getRepositoryMessagesCache(instance) === null) {
@@ -971,6 +971,10 @@ export class BaileysStartupService extends ChannelStartupService {
         for (const m of messages) {
           if (!m.message || !m.key || !m.messageTimestamp) {
             continue;
+          }
+
+          if (m.key.remoteJid?.includes('@lid') && m.key.senderPn) {
+            m.key.remoteJid = m.key.senderPn;
           }
 
           if (Long.isLong(m?.messageTimestamp)) {
@@ -1030,11 +1034,16 @@ export class BaileysStartupService extends ChannelStartupService {
     },
 
     'messages.upsert': async (
-      { messages, type, requestId }: { messages: proto.IWebMessageInfo[]; type: MessageUpsertType; requestId?: string },
+      { messages, type, requestId }: { messages: WAMessage[]; type: MessageUpsertType; requestId?: string },
       settings: any,
     ) => {
       try {
         for (const received of messages) {
+          if (received.key.remoteJid?.includes('@lid') && received.key.senderPn) {
+            (received.key as { previousRemoteJid?: string | null }).previousRemoteJid = received.key.remoteJid;
+            received.key.remoteJid = received.key.senderPn;
+          }
+
           if (received.message?.conversation || received.message?.extendedTextMessage?.text) {
             const text = received.message?.conversation || received.message?.extendedTextMessage?.text;
 
@@ -1356,7 +1365,7 @@ export class BaileysStartupService extends ChannelStartupService {
       }
     },
 
-    'messages.update': async (args: WAMessageUpdate[], settings: any) => {
+    'messages.update': async (args: { update: Partial<WAMessage>; key: WAMessageKey }[], settings: any) => {
       this.logger.log(`Update messages ${JSON.stringify(args, undefined, 2)}`);
 
       const readChatToUpdate: Record<string, true> = {}; // {remoteJid: true}
@@ -1364,6 +1373,10 @@ export class BaileysStartupService extends ChannelStartupService {
       for await (const { key, update } of args) {
         if (settings?.groupsIgnore && key.remoteJid?.includes('@g.us')) {
           continue;
+        }
+
+        if (key.remoteJid?.includes('@lid') && key.senderPn) {
+          key.remoteJid = key.senderPn;
         }
 
         const updateKey = `${this.instance.id}_${key.id}_${update.status}`;
