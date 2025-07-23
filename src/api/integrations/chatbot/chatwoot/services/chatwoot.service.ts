@@ -549,7 +549,7 @@ export class ChatwootService {
   }
 
   public async createConversation(instance: InstanceDto, body: any) {
-    const isLid = body.key.remoteJid.includes('@lid') && body.key.senderPn;
+    const isLid = body.key.previousRemoteJid?.includes('@lid') && body.key.senderPn;
     const remoteJid = isLid ? body.key.senderPn : body.key.remoteJid;
     const cacheKey = `${instance.instanceName}:createConversation-${remoteJid}`;
     const lockKey = `${instance.instanceName}:lock:createConversation-${remoteJid}`;
@@ -557,7 +557,10 @@ export class ChatwootService {
 
     try {
       // Processa atualização de contatos já criados @lid
-      if (body.key.remoteJid.includes('@lid') && body.key.senderPn && body.key.senderPn !== body.key.remoteJid) {
+      if (isLid &&
+        body.key.senderPn !== body.key.previousRemoteJid
+      ) {
+      //if (body.key.remoteJid.includes('@lid') && body.key.senderPn && body.key.senderPn !== body.key.remoteJid) {
         const contact = await this.findContact(instance, body.key.remoteJid.split('@')[0]);
         if (contact && contact.identifier !== body.key.senderPn) {
           this.logger.verbose(
@@ -693,7 +696,7 @@ export class ChatwootService {
             isGroup,
             nameContact,
             picture_url.profilePictureUrl || null,
-            jid,
+            remoteJid,
           );
         }
 
@@ -2100,10 +2103,13 @@ export class ChatwootService {
           const nameFile = `${random}.${mimeTypes.extension(mimeType)}`;
           const fileData = Buffer.from(imgBuffer.data, 'binary');
 
-          const img = await Jimp.read(fileData);
-          await img.cover(320, 180);
+          const img = await Jimp.Jimp.read(fileData);
+          await img.cover({
+            w: 320,
+            h: 180,
+          });
 
-          const processedBuffer = await img.getBufferAsync(Jimp.MIME_PNG);
+          const processedBuffer = await img.getBuffer(Jimp.JimpMime.png);
 
           const fileStream = new Readable();
           fileStream._read = () => {}; // _read is required but you can noop it
